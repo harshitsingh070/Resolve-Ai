@@ -139,3 +139,121 @@ class TestEscalationAndHistory:
         hist = get_action_history(db, "WL7742")
         assert len(hist) == 2
         assert [h.action_type for h in hist] == ["MEAL_VOUCHER", "LOUNGE_ACCESS"]
+
+
+class TestBoundaryAndSecurity:
+    """Audit-required boundaries: 2h,2.99,3,3.01,5,5.01 + 1500/1500.01 + unknown PNR + isolation"""
+
+    def _make_tmp_booking(self, db, pnr_suffix, delay, status="Delayed"):
+        from app.models import Booking, Customer
+        # create temp customer + booking for isolated boundary test
+        tmp_pnr = f"TMP{pnr_suffix}"
+        cust = Customer(name="Tmp", loyalty_tier="Silver", pnr=tmp_pnr+"_C", email="tmp@example.com", phone="000")
+        db.add(cust); db.flush()
+        bk = Booking(customer_id=cust.id, pnr=tmp_pnr, flight_number="TMP", route="A → B", travel_date="2026-09-23", scheduled_departure="10:00", status=status, delay_hours=delay, new_departure=None, reason=None)
+        db.add(bk); db.commit(); db.refresh(bk)
+        return bk.pnr
+
+    def test_meal_under_3h_via_tmp_booking(self, db):
+        pnr = self._make_tmp_booking(db, "2H", 2)
+        a = issue_meal_voucher(db, pnr)
+        assert a.action_type == "MEAL_VOUCHER"
+        # lounge should be blocked for <3
+        with pytest.raises(CompAuthError):
+            grant_lounge_access(db, pnr)
+        # cleanup
+        from app.models import Booking, Customer
+        db.query(Booking).filter(Booking.pnr == pnr).delete()
+        db.query(Customer).filter(Customer.pnr == pnr+"_C").delete()
+        db.commit()
+
+    def test_meal_2_99h_allowed_lounge_blocked(self, db):
+        pnr = self._make_tmp_booking(db, "299", 2.99)
+        a = issue_meal_voucher(db, pnr)
+        assert a.action_type == "MEAL_VOUCHER"
+        with pytest.raises(CompAuthError):
+            grant_lounge_access(db, pnr)
+        from app.models import Booking, Customer
+        db.query(Booking).filter(Booking.pnr == pnr).delete()
+        db.query(Customer).filter(Customer.pnr == pnr+"_C").delete()
+        db.commit()
+
+    def test_3h_unspecified_both_blocked(self, db):
+        pnr = self._make_tmp_booking(db, "3H", 3)
+        with pytest.raises(CompAuthError) as e1:
+            issue_meal_voucher(db, pnr)
+        assert "3h" in str(e1.value) and "unspecified" in str(e1.value).lower()
+        with pytest.raises(CompAuthError) as e2:
+            grant_lounge_access(db, pnr)
+        assert "3h" in str(e2.value)
+        with pytest.raises(CompAuthError):
+            create_hotel_request(db, pnr)
+        from app.models import Booking, Customer
+        db.query(Booking).filter(Booking.pnr == pnr).delete()
+        db.query(Customer).filter(Customer.pnr == pnr+"_C").delete()
+        db.commit()
+
+    def test_3_01h_meal_lounge_allowed_hotel_blocked(self, db):
+        pnr = self._make_tmp_booking(db, "301", 3.01)
+        assert issue_meal_voucher(db, pnr).action_type == "MEAL_VOUCHER"
+        assert grant_lounge_access(db, pnr).action_type == "LOUNGE_ACCESS"
+        with pytest.raises(CompAuthError):
+            create_hotel_request(db, pnr)
+        from app.models import Booking, Customer
+        db.query(Booking).filter(Booking.pnr == pnr).delete()
+        db.query(Customer).filter(Customer.pnr == pnr+"_C").delete()
+        db.commit()
+
+    def test_5h_lounge_no_hotel(self, db):
+        pnr = self._make_tmp_booking(db, "5H", 5)
+        assert grant_lounge_access(db, pnr).action_type == "LOUNGE_ACCESS"
+        with pytest.raises(CompAuthError):
+            create_hotel_request(db, pnr)
+        from app.models import Booking, Customer
+        db.query(Booking).filter(Booking.pnr == pnr).delete()
+        db.query(Customer).filter(Customer.pnr == pnr+"_C").delete()
+        db.commit()
+
+    def test_5_01h_hotel_allowed(self, db):
+        pnr = self._make_tmp_booking(db, "501", 5.01)
+        a = create_hotel_request(db, pnr)
+        assert json.loads(a.metadata_json)["coverage"] == "delayed_hours_only"
+        from app.models import Booking, Customer
+        db.query(Booking).filter(Booking.pnr == pnr).delete()
+        db.query(Customer).filter(Customer.pnr == pnr+"_C").delete()
+        db.commit()
+
+    def test_unknown_pnr_tool_blocked(self, db):
+        with pytest.raises(CompAuthError):
+            issue_meal_voucher(db, "XX9999")
+        with pytest.raises(RefundAuthError):
+            initiate_refund(db, "XX9999")
+        # escalation with unknown PNR should raise ValueError per implementation
+        with pytest.raises(Exception):
+            escalate_to_human(db, "XX9999", "test", "action")
+
+    def test_pnr_isolation(self, db):
+        # requesting one PNR must not return another's booking
+        b1 = get_booking(db, "SK4821X")
+        b2 = get_booking(db, "TR1190B")
+        assert b1.pnr != b2.pnr
+        assert b1.flight_number != b2.flight_number
+        c1 = get_customer(db, "SK4821X")
+        c2 = get_customer(db, "TR1190B")
+        assert c1.pnr != c2.pnr
+
+    def test_fare_1500_01_requires_supervisor_via_authorize(self, db):
+        from app.policies.policy_engine import authorize_fare_waiver
+        auth = authorize_fare_waiver(1500.01)
+        assert auth.allowed is False and auth.escalation is True
+        auth2 = authorize_fare_waiver(1500)
+        assert auth2.allowed is True
+
+    def test_refund_original_vs_alternate(self, db):
+        from app.policies.policy_engine import authorize_refund
+        from app.tools.booking_tools import get_booking
+        b = get_booking(db, "SK4821X")
+        assert authorize_refund(b, "original").allowed is True
+        assert authorize_refund(b, "alternate").escalation is True
+        b2 = get_booking(db, "TR1190B")
+        assert authorize_refund(b2).allowed is False  # delayed not airline cancelled

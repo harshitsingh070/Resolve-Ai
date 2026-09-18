@@ -15,30 +15,39 @@ from app.policies.policy_engine import (
 )
 
 
-# Delay cases - we are strict, 3 hours is not enough, 5 is not enough for hotel
+# Delay cases — corrected per authoritative Data Pack:
+# <3h -> meal 500 only, ==3h -> unspecified (no entitlement), >3h -> meal+ lounge, >5h -> + hotel delayed-only
 
 class TestDelay:
     def test_cancelled_or_none_no_comp(self):
         r = evaluate_delay(None)
         assert r.meal_voucher is False and r.lounge_access is False and r.hotel is False
         assert r.meal_voucher_amount is None and r.hotel_coverage is None
+        assert r.unspecified is False
 
-    def test_delay_2h_no_comp(self):
+    def test_delay_2h_meal_only(self):
         r = evaluate_delay(2)
-        assert r.meal_voucher is False and r.lounge_access is False and r.hotel is False
+        assert r.meal_voucher is True and r.meal_voucher_amount == 500
+        assert r.lounge_access is False and r.hotel is False
+        assert r.hotel_coverage is None and r.unspecified is False
 
-    def test_delay_3h_exact_no_comp(self):
-        # boundary: needs OVER 3h
+    def test_delay_2_99h_meal_only(self):
+        r = evaluate_delay(2.99)
+        assert r.meal_voucher is True and r.lounge_access is False and r.hotel is False
+
+    def test_delay_3h_exact_unspecified(self):
+        # source has no rule for exactly 3h — must not invent entitlement
         r = evaluate_delay(3)
-        assert r.meal_voucher is False
+        assert r.meal_voucher is False and r.lounge_access is False and r.hotel is False
+        assert r.unspecified is True
         r2 = evaluate_delay(3.0)
-        assert r2.meal_voucher is False
+        assert r2.unspecified is True
 
-    def test_delay_3_1h_meal_lounge_no_hotel(self):
+    def test_delay_3_01h_meal_lounge_no_hotel(self):
         r = evaluate_delay(3.01)
         assert r.meal_voucher is True and r.meal_voucher_amount == 500
         assert r.lounge_access is True and r.hotel is False
-        assert r.hotel_coverage is None
+        assert r.hotel_coverage is None and r.unspecified is False
 
     def test_delay_4h_meal_lounge_no_hotel(self):
         # S-02 Arvind TR1190B
@@ -48,12 +57,11 @@ class TestDelay:
         assert r.hotel is False and r.hotel_coverage is None
 
     def test_delay_5h_exact_no_hotel(self):
-        # boundary: needs OVER 5h
         r = evaluate_delay(5)
-        assert r.meal_voucher is True and r.hotel is False
+        assert r.meal_voucher is True and r.lounge_access is True and r.hotel is False
         assert r.hotel_coverage is None
 
-    def test_delay_5_1h_hotel_delayed_only(self):
+    def test_delay_5_01h_hotel_delayed_only(self):
         r = evaluate_delay(5.01)
         assert r.hotel is True and r.hotel_coverage == "delayed_hours_only"
 
@@ -66,8 +74,9 @@ class TestDelay:
 
     def test_delay_float_and_negative(self):
         assert evaluate_delay(4.0).meal_voucher is True
-        assert evaluate_delay(-1).meal_voucher is False  # treated as 0
-        assert evaluate_delay(0).hotel is False
+        # -1 is normalized to 0 (<3) -> meal only per corrected pack
+        assert evaluate_delay(-1).meal_voucher is True and evaluate_delay(-1).lounge_access is False
+        assert evaluate_delay(0).meal_voucher is True and evaluate_delay(0).hotel is False
 
 
 # Cancellation - only airline-caused cancellations get refund or rebooking
@@ -116,6 +125,11 @@ class TestFare:
     def test_1500_at_limit(self):
         r = evaluate_fare_difference(1500)
         assert r.agent_can_waive is True and r.requires_supervisor is False
+
+    def test_1500_01_just_over_limit(self):
+        # boundary: 1500 is allowed, 1500.01 requires supervisor
+        r = evaluate_fare_difference(1500.01)
+        assert r.agent_can_waive is False and r.requires_supervisor is True
 
     def test_1501_over_limit(self):
         r = evaluate_fare_difference(1501)

@@ -24,24 +24,34 @@ def _existing_action(db: Session, booking_id: int, action_type: str):
 
 
 def issue_meal_voucher(db: Session, pnr: str) -> Action:
-    """Issue Rs 500 meal voucher — only if delay >3h. Idempotent."""
+    """Issue Rs 500 meal voucher — per corrected Data Pack: <3h → meal only, >3h → meal+ lounge, =3h unspecified. Idempotent."""
     booking = get_booking(db, pnr)
     if not booking:
         raise AuthorizationError(f"Booking not found for PNR '{pnr}'")
     policy = evaluate_delay(booking.delay_hours)
+    if policy.unspecified:
+        raise AuthorizationError(
+            f"Delay is exactly 3h — source Data Pack provides no meal voucher rule for 3h (unspecified). PNR {pnr} not eligible. Do not invent entitlement."
+        )
     if not policy.meal_voucher:
         raise AuthorizationError(
-            f"Meal voucher requires delay over 3h (SR-03). PNR {pnr} has delay={booking.delay_hours}, not eligible."
+            f"Meal voucher not eligible per Data Pack. PNR {pnr} has delay={booking.delay_hours} (cancelled/None or unspecified 3h). Eligible: delay <3h (SR-02) or delay >3h (SR-03)."
         )
     existing = _existing_action(db, booking.id, "MEAL_VOUCHER")
     if existing:
         return existing
+    # reason distinguishes under vs over 3h for audit
+    try:
+        h = float(booking.delay_hours) if booking.delay_hours is not None else None
+    except Exception:
+        h = None
+    reason = "delay_under_3h" if (h is not None and h < 3) else "delay_over_3h"
     action = Action(
         booking_id=booking.id,
         pnr=booking.pnr,
         action_type="MEAL_VOUCHER",
         status="completed",
-        reason="delay_over_3h",
+        reason=reason,
         metadata_json=json.dumps({"amount": policy.meal_voucher_amount}),
     )
     db.add(action)
@@ -51,14 +61,18 @@ def issue_meal_voucher(db: Session, pnr: str) -> Action:
 
 
 def grant_lounge_access(db: Session, pnr: str) -> Action:
-    """Grant lounge access — only if delay >3h. Idempotent."""
+    """Grant lounge access — only if delay >3h (corrected pack). Idempotent."""
     booking = get_booking(db, pnr)
     if not booking:
         raise AuthorizationError(f"Booking not found for PNR '{pnr}'")
     policy = evaluate_delay(booking.delay_hours)
+    if policy.unspecified:
+        raise AuthorizationError(
+            f"Delay is exactly 3h — source Data Pack provides no lounge rule for 3h (unspecified). PNR {pnr} not eligible."
+        )
     if not policy.lounge_access:
         raise AuthorizationError(
-            f"Lounge requires delay over 3h (SR-03). PNR {pnr} has delay={booking.delay_hours}."
+            f"Lounge requires delay over 3h (SR-03, >3h). PNR {pnr} has delay={booking.delay_hours}, not eligible (under 3h gives meal only, no lounge)."
         )
     existing = _existing_action(db, booking.id, "LOUNGE_ACCESS")
     if existing:
@@ -79,7 +93,7 @@ def grant_lounge_access(db: Session, pnr: str) -> Action:
 
 def create_hotel_request(db: Session, pnr: str) -> Action:
     """
-    Create hotel request for delayed-hours only — only if delay >5h.
+    Create hotel request for delayed-hours only — only if delay >5h (SR-04).
     Coverage is always delayed_hours_only per SR-04 (full-night never created).
     Idempotent.
     """
@@ -87,6 +101,10 @@ def create_hotel_request(db: Session, pnr: str) -> Action:
     if not booking:
         raise AuthorizationError(f"Booking not found for PNR '{pnr}'")
     policy = evaluate_delay(booking.delay_hours)
+    if policy.unspecified:
+        raise AuthorizationError(
+            f"Delay is exactly 3h — source Data Pack provides no hotel rule for 3h (unspecified). PNR {pnr} not eligible."
+        )
     if not policy.hotel:
         raise AuthorizationError(
             f"Hotel requires delay over 5h (SR-04). PNR {pnr} has delay={booking.delay_hours}, not eligible."

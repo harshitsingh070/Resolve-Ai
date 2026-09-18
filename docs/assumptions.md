@@ -12,9 +12,10 @@ These are verbatim from the assignment. No ambiguity — implement exactly as st
 | # | Rule | Verbatim Summary |
 |---|------|-----------------|
 | E-01 | Cancellation Rebooking | Airline-cancelled → free rebooking on next available flight within 24h **OR** full refund (customer's choice) |
-| E-02 | Delay >3h | → ₹500 meal voucher + lounge access |
-| E-03 | Delay >5h | → Meal voucher + lounge + hotel **covering ONLY delayed hours, NOT full night** |
-| E-04 | Delay <3h | No compensation rule provided (→ none) |
+| E-02a | Delay <3h | → ₹500 meal voucher (no lounge, no hotel) |
+| E-02b | Delay =3h | **UNSPECIFIED — Source Data Pack provides no rule for exactly 3h. Do not invent.** |
+| E-02c | Delay >3h (and ≤5h) | → ₹500 meal voucher + lounge access (no hotel) |
+| E-03 | Delay >5h | → Meal voucher (₹500) + lounge + hotel **covering ONLY delayed hours, NOT full night** |
 | E-05 | Refund Processing | Airline-cancelled → full refund within 7 business days to **original payment method only** |
 | E-06 | Fare Difference — Authority Limit | **Agent cannot waive fare difference above ₹1,500 without supervisor approval** (explicit authority cap) |
 | E-07 | Loyalty Priority | Gold/Platinum → priority rebooking (first access). **NO additional compensation** due to tier |
@@ -49,7 +50,7 @@ These are **not invented rules** — they are the minimal interpretations needed
 
 ### 2.4 Delay Hours Derivation
 - **Source:** `TR1190B: Delayed 4h (07:10→11:10)`, `WL7742: Delayed 6h (14:00→20:00)` + `delay_hours` column in DB spec.
-- **Interpretation:** `delay_hours` stored as float/integer derived from status string or explicit column; policy thresholds are `>3` and `>5` (strict), so 3.0 = no comp, 4.0 = meal+lounge, 6.0 = meal+lounge+hotel.
+- **Authoritative thresholds (corrected):** `delay <3` → meal only; `delay ==3` → unspecified (no rule, do not invent); `delay >3` and ≤5 → meal+lounge; `delay >5` → meal+lounge+hotel delayed-hours-only. So `2h` = meal, `3.0` = unspecified, `4.0` = meal+lounge, `6.0` = meal+lounge+hotel.
 
 ### 2.5 Loyalty No-Extra-Compensation
 - **Interpretation:** If customer says "I'm Platinum so give extra cash," agent must cite SR-07: tier = priority rebooking only, no extra compensation.

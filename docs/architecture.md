@@ -199,7 +199,7 @@ Each tool is a **thin, auditable function that self-checks authority before writ
 |------|-------|-----------------------------|
 | `customer_tools.py` | `get_customer(pnr)` | Always allow; returns 404 if unknown |
 | `booking_tools.py` | `get_booking(pnr)` | Always allow |
-| `compensation_tools.py` | `issue_meal_voucher(pnr)`, `grant_lounge_access(pnr)`, `create_hotel_request(pnr, coverage)` | Check `evaluate_delay`; check idempotency (no duplicate issued) |
+| `compensation_tools.py` | `issue_meal_voucher(pnr)`, `grant_lounge_access(pnr)`, `create_hotel_request(pnr, coverage)` | Check `evaluate_delay` (meal:<3 or >3; lounge:>3; hotel:>5) + idempotency |
 | `refund_tools.py` | `initiate_refund(pnr)`, `rebook_next_available(pnr)` | Check `evaluate_cancellation`; verify not already refunded/rebooked |
 | `escalation_tools.py` | `escalate_to_human(pnr, reason, requested_action)` | Always allow; creates `escalations` row with `pending` |
 
@@ -368,17 +368,31 @@ class DelayResult(BaseModel):
     lounge_access: bool
     hotel: bool
     hotel_coverage: Literal["delayed_hours_only"] | None
+    unspecified: bool = False  # true only when delay_hours == 3.0 (source has no rule)
+    unspecified_reason: str | None = None
 
 def evaluate_delay(delay_hours: float | None) -> DelayResult:
-    if delay_hours is None or delay_hours < 3:  # also covers Cancelled
+    # Corrected per Data Pack: <3 -> meal only, ==3 -> unspecified, >3 -> meal+lounge, >5 -> +hotel
+    if delay_hours is None:
         return DelayResult(meal_voucher=False, meal_voucher_amount=None,
-                           lounge_access=False, hotel=False, hotel_coverage=None)
-    if delay_hours > 5:
+                           lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
+    h = float(delay_hours)
+    if h < 0: h = 0
+    if abs(h - 3.0) < 1e-9:
+        return DelayResult(meal_voucher=False, meal_voucher_amount=None,
+                           lounge_access=False, hotel=False, hotel_coverage=None,
+                           unspecified=True, unspecified_reason="Source has no rule for exactly 3h")
+    if h > 5:
         return DelayResult(meal_voucher=True, meal_voucher_amount=500,
-                           lounge_access=True, hotel=True, hotel_coverage="delayed_hours_only")
-    # >3 and <=5
-    return DelayResult(meal_voucher=True, meal_voucher_amount=500,
-                       lounge_access=True, hotel=False, hotel_coverage=None)
+                           lounge_access=True, hotel=True, hotel_coverage="delayed_hours_only", unspecified=False)
+    if h > 3:
+        return DelayResult(meal_voucher=True, meal_voucher_amount=500,
+                           lounge_access=True, hotel=False, hotel_coverage=None, unspecified=False)
+    if h < 3:
+        return DelayResult(meal_voucher=True, meal_voucher_amount=500,
+                           lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
+    return DelayResult(meal_voucher=False, meal_voucher_amount=None,
+                       lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
 
 class CancellationResult(BaseModel):
     eligible_for_free_rebooking: bool
@@ -409,16 +423,19 @@ def evaluate_fare_difference(amount: int) -> FareResult:
                       requires_supervisor=amount > 1500)
 ```
 
-### 6.2 Truth Tables (Test Spec)
+### 6.2 Truth Tables (Test Spec — Corrected per Data Pack)
 
-| Input | meal | amount | lounge | hotel | hotel_coverage |
-|-------|------|--------|--------|-------|----------------|
-| 2h | false | null | false | false | null |
-| 3h | false | null | false | false | null (needs **over** 3h) |
-| 4h (Arvind) | **true** | 500 | **true** | false | null |
-| 5h | true | 500 | true | false | null (needs **over** 5h) |
-| 6h (Meher) | true | 500 | true | **true** | delayed_hours_only |
-| null/Cancelled | false | null | false | false | null |
+| Input | meal | amount | lounge | hotel | hotel_coverage | unspecified |
+|-------|------|--------|--------|-------|----------------|-------------|
+| 2h | **true** | 500 | false | false | null | false |
+| 2.99h | **true** | 500 | false | false | null | false |
+| 3h | false | null | false | false | null | **true** (source has no rule) |
+| 3.01h | **true** | 500 | **true** | false | null | false |
+| 4h (Arvind) | **true** | 500 | **true** | false | null | false |
+| 5h | **true** | 500 | **true** | false | null | false (needs **over** 5h for hotel) |
+| 5.01h | **true** | 500 | **true** | **true** | delayed_hours_only | false |
+| 6h (Meher) | **true** | 500 | **true** | **true** | delayed_hours_only | false |
+| null/Cancelled | false | null | false | false | null | false |
 
 ### 6.3 Authorization Layer — Explicitly Separate from Policy Engine (Review Fix)
 
@@ -852,7 +869,7 @@ ResolveAI/
 
 | Layer | Test File | Covers |
 |-------|-----------|--------|
-| Policy engine (no LLM) | `backend/tests/test_policy_engine.py` | 2h→none, 4h→meal+lounge, 6h→+hotel, ₹1000/1500/2000, cancellation, hotel coverage |
+| Policy engine (no LLM) | `backend/tests/test_policy_engine.py` | <3h→meal, =3h→unspecified, 4h→meal+lounge, 5h→meal+lounge, 5.01h/6h→+hotel, ₹1000/1500/1500.01/2000, cancellation, hotel coverage |
 | Tools (authz) | `backend/tests/test_tools.py` | Refund only if cancelled, voucher only if delay>3h, idempotency, escalation creation |
 | API | `backend/tests/test_api.py` | POST /api/chat for S-01/S-02/S-03 returns correct actions/escalation + persists rows |
 | E2E paraphrase | `test_intent_paraphrase` | "I need somewhere to stay" == "Can you arrange accommodation?" → same hotel intent |

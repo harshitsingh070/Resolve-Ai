@@ -23,6 +23,9 @@ class DelayResult(BaseModel):
     lounge_access: bool
     hotel: bool
     hotel_coverage: Optional[Literal["delayed_hours_only"]] = None
+    # True only when delay_hours == 3.0 — source has no rule for exactly 3h (explicitly unspecified)
+    unspecified: bool = False
+    unspecified_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         return self.model_dump()
@@ -40,7 +43,7 @@ class CancellationResult(BaseModel):
 
 
 class FareResult(BaseModel):
-    fare_difference: int
+    fare_difference: float
     agent_limit: int = 1500
     agent_can_waive: bool
     requires_supervisor: bool
@@ -64,30 +67,45 @@ class AuthorizationResult(BaseModel):
 
 def evaluate_delay(delay_hours: Optional[float]) -> DelayResult:
     """
-    How we handle delays is pretty straightforward.
-    If there is no delay (or flight is cancelled) - nothing extra.
-    More than 3 hours -> meal voucher + lounge.
-    More than 5 hours -> everything above + hotel, but only for the
-    delayed hours, never a full night.
+    Authoritative Data Pack (corrected):
+      delay < 3h  → meal voucher Rs 500 only (no lounge, no hotel)
+      delay == 3h → UNSPECIFIED — source provides no rule, do not invent
+      delay > 3h and <=5h → meal voucher Rs 500 + lounge access
+      delay > 5h → meal voucher Rs 500 + lounge + hotel (delayed-hours only)
 
-    We are strict on the boundaries. Exactly 3 hours is still not
-    enough, and exactly 5 hours is still not enough for a hotel.
+    Boundaries are strict per pack examples:
+      2h, 2.99h → meal only
+      3h → unspecified (no entitlement invented)
+      3.01h, 4h → meal + lounge
+      5h → meal + lounge (no hotel)
+      5.01h, 6h → meal + lounge + hotel delayed-hours-only
+    None covers Cancelled/Unaffected (no delay).
     """
     if delay_hours is None:
-        return DelayResult(meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None)
-    # Normalize - negative delays are treated as 0
+        return DelayResult(meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
     try:
         h = float(delay_hours)
     except Exception:
-        return DelayResult(meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None)
+        return DelayResult(meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
     if h < 0:
         h = 0
 
+    # Exactly 3.0 is explicitly unspecified — do not invent entitlement
+    if abs(h - 3.0) < 1e-9:
+        return DelayResult(
+            meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None,
+            unspecified=True, unspecified_reason="Source Data Pack provides no rule for exactly 3h",
+        )
+
     if h > 5:
-        return DelayResult(meal_voucher=True, meal_voucher_amount=500, lounge_access=True, hotel=True, hotel_coverage="delayed_hours_only")
+        return DelayResult(meal_voucher=True, meal_voucher_amount=500, lounge_access=True, hotel=True, hotel_coverage="delayed_hours_only", unspecified=False)
     if h > 3:
-        return DelayResult(meal_voucher=True, meal_voucher_amount=500, lounge_access=True, hotel=False, hotel_coverage=None)
-    return DelayResult(meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None)
+        return DelayResult(meal_voucher=True, meal_voucher_amount=500, lounge_access=True, hotel=False, hotel_coverage=None, unspecified=False)
+    if h < 3:
+        # covers 2h, 2.99h etc. — meal only per corrected pack
+        return DelayResult(meal_voucher=True, meal_voucher_amount=500, lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
+    # fallback (should not reach due to 3.0 case above)
+    return DelayResult(meal_voucher=False, meal_voucher_amount=None, lounge_access=False, hotel=False, hotel_coverage=None, unspecified=False)
 
 
 def evaluate_cancellation(booking) -> CancellationResult:
@@ -129,21 +147,26 @@ def evaluate_cancellation(booking) -> CancellationResult:
     )
 
 
-def evaluate_fare_difference(amount: int) -> FareResult:
+def evaluate_fare_difference(amount) -> FareResult:
     """
     This one is about who can waive money. Our agent can only waive
     up to Rs 1,500 on its own. Anything higher, like Meher's Rs 2,000,
     has to go to a supervisor. That limit is fixed and we don't try
     to interpret it further - see assumptions for why.
+
+    Boundary is inclusive: 1500 is allowed, 1500.01 is not.
+    Accepts int or float (e.g., 1500.01 test case).
     """
     try:
-        amt = int(amount)
+        amt = float(amount)
     except Exception:
-        raise ValueError(f"fare_difference amount must be int, got {amount!r}")
+        raise ValueError(f"fare_difference amount must be numeric, got {amount!r}")
     if amt < 0:
         amt = 0
+    # Preserve int when possible for cleaner JSON, but keep float precision for 1500.01
+    fare_val = int(amt) if amt.is_integer() else amt
     return FareResult(
-        fare_difference=amt,
+        fare_difference=fare_val,
         agent_limit=1500,
         agent_can_waive=amt <= 1500,
         requires_supervisor=amt > 1500,

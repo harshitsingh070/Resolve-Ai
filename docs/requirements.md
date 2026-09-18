@@ -44,9 +44,10 @@ The agent must:
 | ID | Rule | Definition |
 |----|------|------------|
 | SR-01 | Cancellation Rebooking | If flight cancelled by airline → entitled to **free rebooking on next available flight within 24 hours** OR full refund (customer's choice). |
-| SR-02 | Delay < 3 Hours | No compensation rule provided. |
-| SR-03 | Delay > 3 Hours | → ₹500 meal voucher + lounge access |
-| SR-04 | Delay > 5 Hours | → Meal voucher + lounge access + **hotel accommodation covering ONLY the delayed hours** (NOT full night) |
+| SR-02 | Delay < 3 Hours | → ₹500 meal voucher (no lounge, no hotel) |
+| SR-02a | Delay = 3 Hours | **UNSPECIFIED — Source Data Pack provides no rule for exactly 3h. Do not invent entitlement.** |
+| SR-03 | Delay > 3 Hours (and ≤5h) | → ₹500 meal voucher + lounge access (no hotel) |
+| SR-04 | Delay > 5 Hours | → Meal voucher (₹500) + lounge access + **hotel accommodation covering ONLY the delayed hours** (NOT full night) |
 | SR-05 | Refund Processing | Airline-caused cancellations → full refund within **7 business days** to **original payment method only**. |
 | SR-06 | Fare Difference | **Core rule (explicit):** Agent **cannot waive fare difference >₹1,500** without supervisor approval. **Context sentence from assignment:** "If a customer voluntarily chooses to rebook on a higher-fare flight and the disruption is NOT airline-caused → customer must pay the fare difference." See `assumptions.md` §2.3 for how this interacts with Meher's airline-caused delay scenario (₹2,000 waiver still requires escalation via the explicit authority limit alone). |
 | SR-07 | Loyalty Tier | Gold/Platinum → **priority rebooking** (first access to next-available seats). **NO additional compensation** beyond standard policy due to tier. |
@@ -130,12 +131,15 @@ evaluate_delay(delay_hours: float) -> {
   meal_voucher_amount: int | None, # 500 if true
   lounge_access: bool,
   hotel: bool,
-  hotel_coverage: "delayed_hours_only" | None
+  hotel_coverage: "delayed_hours_only" | None,
+  unspecified: bool, # true only when delay_hours == 3.0 (source has no rule)
+  unspecified_reason: str | None
 }
-# truth table:
-# <3h  → {false, None, false, false, None}
-# 4h   → {true, 500, true, false, None}
-# 6h   → {true, 500, true, true, "delayed_hours_only"}
+# truth table (authoritative Data Pack, corrected):
+# <3h  (e.g., 2h, 2.99h) → {meal:true(500), lounge:false, hotel:false}
+# =3h  → {meal:false, lounge:false, hotel:false, unspecified:true}  # DO NOT invent entitlement
+# >3h and ≤5h (e.g., 3.01h, 4h, 5h) → {meal:true(500), lounge:true, hotel:false}
+# >5h  (e.g., 5.01h, 6h) → {meal:true(500), lounge:true, hotel:true("delayed_hours_only")}
 
 evaluate_cancellation(booking) -> {
   eligible_for_free_rebooking: bool, # true if status==Cancelled + airline-caused
@@ -159,9 +163,11 @@ evaluate_fare_difference(amount: int) -> {
 |--------|:--------:|-----------|--------------|
 | Rebook next available within 24h (free) | ✅ | Airline-caused cancellation (R-01) | — |
 | Full refund | ✅ | Airline-caused cancellation | Block + escalate if non-airline |
-| Meal voucher ₹500 | ✅ | Delay >3h | Deny with explanation |
-| Lounge access | ✅ | Delay >3h | Deny with explanation |
+| Meal voucher ₹500 | ✅ | Delay <3h (meal only) OR Delay >3h (meal+lounge) — see note below | Deny with explanation if exactly 3h (unspecified) or None |
+| Lounge access | ✅ | Delay >3h and ≤5h, or >5h | Deny with explanation if <3h or =3h (unspecified) |
 | Hotel (delayed-hours only) | ✅ | Delay >5h | Deny; explain hotel requires >5h |
+
+> Note: Delay =3h is **unspecified by source** — do not invent meal/lounge/hotel entitlement for exactly 3h.
 | Show own booking/flight status | ✅ | Always | — |
 | Waive fare diff ≤₹1500 | ✅ | Within limit | — |
 | Waive fare diff >₹1500 (e.g., ₹2000) | ❌ | Exceeds limit | **Escalate to supervisor** |
@@ -304,11 +310,13 @@ ResolveAI/
 
 ### 10.1 Policy Engine Unit Tests (Must pass without LLM)
 - Cancellation: airline cancellation → `eligible_for_full_refund:true`, `eligible_for_free_rebooking:true`
-- Delay 2h → `{meal:false, lounge:false, hotel:false}`
-- Delay 4h → `{meal:true(500), lounge:true, hotel:false}`
-- Delay 6h → `{meal:true(500), lounge:true, hotel:true(delayed_hours_only)}`
+- Delay <3h (2h, 2.99h) → `{meal:true(500), lounge:false, hotel:false}`
+- Delay =3h → `{meal:false, lounge:false, hotel:false, unspecified:true}` (no entitlement invented)
+- Delay >3h (3.01h, 4h, 5h) → `{meal:true(500), lounge:true, hotel:false}`
+- Delay >5h (5.01h, 6h) → `{meal:true(500), lounge:true, hotel:true(delayed_hours_only)}`
 - Fare diff ₹1000 → `agent_can_waive:true`
-- Fare diff ₹1500 → `agent_can_waive:true` (at limit)
+- Fare diff ₹1500 → `agent_can_waive:true` (at limit — does NOT escalate)
+- Fare diff ₹1500.01 → `agent_can_waive:false, requires_supervisor:true` (just over limit)
 - Fare diff ₹2000 → `agent_can_waive:false, requires_supervisor:true`
 - Authority: unsupported upgrade → escalate
 - Full-night hotel when only delayed-hours → reject
