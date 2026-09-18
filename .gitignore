@@ -1,0 +1,54 @@
+# ResolveAI — .gitignore (Locked, Phase 2)
+# Never commit secrets, DB, venv, or build artifacts
+
+# Secrets
+.env
+backend/.env
+*.env.local
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+backend/venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database (SQLite file is local, not committed — seed recreates)
+*.db
+*.sqlite
+*.sqlite3
+resolveai.db
+backend/resolveai.db
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+dist/
+.vite/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Misc
+tmp/
+temp/
