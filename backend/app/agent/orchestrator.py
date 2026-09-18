@@ -116,8 +116,8 @@ def handle_chat(db: Session, pnr: str, message: str) -> dict:
             resp = generate_response(msg, booking_ctx, policy_result, [], esc.__dict__, decision_trace, pnr_norm)
         except Exception:
             resp = "I understand this is a serious concern. I've escalated your case to a human agent immediately who will contact you shortly."
-        # audit assistant
-        db.add(Conversation(booking_id=booking.id, pnr=booking.pnr, role="assistant", message=resp, intent_json=json.dumps(intent.model_dump())))
+        # audit assistant — persist factual decision trace (read-only after refresh, no Groq regeneration)
+        db.add(Conversation(booking_id=booking.id, pnr=booking.pnr, role="assistant", message=resp, intent_json=json.dumps(intent.model_dump()), decision_trace_json=json.dumps(decision_trace)))
         db.commit()
         return {
             "response": resp,
@@ -347,8 +347,8 @@ def handle_chat(db: Session, pnr: str, message: str) -> dict:
             else:
                 resp = "I can help with your booking. Available policies: meal voucher, lounge, hotel (delayed-hours only for >5h), refund/rebook for airline cancellations."
 
-    # Audit assistant message
-    db.add(Conversation(booking_id=booking.id, pnr=booking.pnr, role="assistant", message=resp, intent_json=json.dumps(intent.model_dump())))
+    # Audit assistant message — persist factual decision trace
+    db.add(Conversation(booking_id=booking.id, pnr=booking.pnr, role="assistant", message=resp, intent_json=json.dumps(intent.model_dump()), decision_trace_json=json.dumps(trace)))
     db.commit()
 
     return {

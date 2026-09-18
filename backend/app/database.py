@@ -25,6 +25,18 @@ def _resolve_db_url(url: str) -> str:
         return f"sqlite:///{abs_path.as_posix()}"
     return url
 
+def ensure_trace_column():
+    """Auto-migrate: add decision_trace column if DB was created before Phase 8. Idempotent."""
+    try:
+        with engine.connect() as conn:
+            result = conn.exec_driver_sql("PRAGMA table_info(conversations)")
+            cols = [r[1] for r in result.fetchall()]
+            if "decision_trace" not in cols:
+                conn.exec_driver_sql("ALTER TABLE conversations ADD COLUMN decision_trace TEXT")
+                conn.commit()
+    except Exception:
+        pass  # fresh DB will be created correctly by create_all
+
 RESOLVED_DB_URL = _resolve_db_url(settings.DATABASE_URL)
 
 # SQLite needs check_same_thread=False for FastAPI threaded use

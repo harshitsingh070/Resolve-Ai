@@ -91,6 +91,7 @@ class Conversation(Base):
     role = Column(String, nullable=False)  # user | assistant
     message = Column(Text, nullable=False)
     intent_json = Column("intent", Text, nullable=True)  # JSON string
+    decision_trace_json = Column("decision_trace", Text, nullable=True)  # JSON array of strings — persisted factual trace (read-only after refresh, no Groq regeneration)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
     booking = relationship("Booking", back_populates="conversations")
