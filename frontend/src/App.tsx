@@ -16,6 +16,8 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showSugg, setShowSugg] = useState(false)
+  const [used, setUsed] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('resolveai_used_pnrs')||'[]') } catch { return [] } })
 
   const load = async (selected: string) => {
     if (!selected) { setCustomer(null); setBooking(null); setMessages([]); setTrace([]); setActions([]); setEscalation(null); setError(null); return }
@@ -24,6 +26,13 @@ export default function App() {
     try {
       const sess = await getSession(selected)
       setCustomer(sess.customer); setBooking(sess.booking); setMessages(sess.messages); setTrace(sess.decision_trace || []); setActions(sess.actions); setEscalation(sess.escalation)
+      // track used PNRs for suggestions (keep last 6 unique)
+      try {
+        const prev: string[] = JSON.parse(localStorage.getItem('resolveai_used_pnrs')||'[]')
+        const next = [selected, ...prev.filter(p=> p!==selected)].slice(0,6)
+        localStorage.setItem('resolveai_used_pnrs', JSON.stringify(next))
+        setUsed(next)
+      } catch {}
     } catch (e: any) {
       const msg = String(e.message)
       const friendly = msg.includes('not found') ? 'Booking not found' : msg
@@ -65,7 +74,31 @@ export default function App() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs hidden sm:inline" style={{color:'var(--text-secondary)'}}>PNR</span>
-          <input value={lookup} onChange={e=> setLookup(e.target.value)} onKeyDown={e=> e.key==='Enter' && handleFind()} placeholder="SK4821X" className="border rounded-md px-3 py-1.5 text-sm w-36 bg-white" style={{borderColor:'var(--border)'}} />
+          <div className="relative">
+            <input value={lookup} onChange={e=> setLookup(e.target.value)} onFocus={()=> setShowSugg(true)} onBlur={()=> setTimeout(()=> setShowSugg(false),150)} onKeyDown={e=> e.key==='Enter' && handleFind()} placeholder="SK4821X" list="pnr-suggestions" className="border rounded-md px-3 py-1.5 text-sm w-36 bg-white" style={{borderColor:'var(--border)'}} />
+            {showSugg && (
+              <div className="absolute top-full mt-1 left-0 w-72 bg-white border rounded-lg shadow-lg z-20 max-h-64 overflow-y-auto" style={{borderColor:'var(--border)'}}>
+                <div className="px-3 py-2 text-[11px] font-semibold" style={{color:'var(--text-secondary)'}}>Provided PNRs</div>
+                {[
+                  {pnr:'SK4821X', desc:'Priya Nair · Gold · SK-204 Cancelled'},
+                  {pnr:'TR1190B', desc:'Arvind Kulkarni · Silver · SK-118 Delayed 4h'},
+                  {pnr:'WL7742', desc:'Meher Kaur · Platinum · SK-305 Delayed 6h'},
+                  {pnr:'SK4821X-R', desc:'Priya return · SK-204R Unaffected'},
+                ].filter(o=> !lookup || o.pnr.toLowerCase().includes(lookup.toLowerCase()) || o.desc.toLowerCase().includes(lookup.toLowerCase())).map(o=> (
+                  <button key={o.pnr} onMouseDown={e=>{e.preventDefault(); setLookup(o.pnr); setPnr(o.pnr)}} className="w-full text-left px-3 py-2 hover:bg-gray-50 flex justify-between items-center">
+                    <span className="text-sm font-mono" style={{color:'var(--text)'}}>{o.pnr}</span><span className="text-xs" style={{color:'var(--text-secondary)'}}>{o.desc}</span>
+                  </button>
+                ))}
+                {used.length>0 && <>
+                  <div className="px-3 py-2 text-[11px] font-semibold border-t mt-1" style={{color:'var(--text-secondary)', borderColor:'var(--border)'}}>Recently used</div>
+                  {used.filter(p=> !lookup || p.toLowerCase().includes(lookup.toLowerCase())).map(p=> (
+                    <button key={p} onMouseDown={e=>{e.preventDefault(); setLookup(p); setPnr(p)}} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm font-mono" style={{color:'var(--text)'}}>{p}</button>
+                  ))}
+                </>}
+                <div className="px-3 py-2 text-[11px] border-t" style={{color:'var(--text-secondary)', borderColor:'var(--border)'}}>Type to filter · Press Enter to Find</div>
+              </div>
+            )}
+          </div>
           <button onClick={handleFind} className="px-4 py-1.5 rounded-md text-sm text-white" style={{background:'var(--primary)'}}>Find</button>
           <span className="text-xs hidden md:inline ml-2" style={{color:'var(--text-secondary)'}}>Help</span>
         </div>
@@ -87,8 +120,25 @@ export default function App() {
             <div className="bg-white border rounded-xl p-8 text-center max-w-md w-full" style={{borderColor:'var(--border)'}}>
               <div className="text-base font-semibold" style={{color:'var(--text)'}}>How can we help with your flight?</div>
               <div className="text-sm mt-1" style={{color:'var(--text-secondary)'}}>Enter your booking reference to get started.</div>
-              <div className="flex gap-2 justify-center mt-4">
-                <input value={lookup} onChange={e=> setLookup(e.target.value)} onKeyDown={e=> e.key==='Enter' && handleFind()} placeholder="SK4821X" className="flex-1 border rounded-md px-3 py-2 text-sm" style={{borderColor:'var(--border)'}} />
+              <div className="flex gap-2 justify-center mt-4 relative">
+                <div className="flex-1 relative">
+                  <input value={lookup} onChange={e=> setLookup(e.target.value)} onFocus={()=> setShowSugg(true)} onBlur={()=> setTimeout(()=> setShowSugg(false),150)} onKeyDown={e=> e.key==='Enter' && handleFind()} placeholder="SK4821X" className="w-full border rounded-md px-3 py-2 text-sm" style={{borderColor:'var(--border)'}} />
+                  {showSugg && (
+                    <div className="absolute top-full mt-1 left-0 right-0 bg-white border rounded-lg shadow-lg z-20 max-h-64 overflow-y-auto" style={{borderColor:'var(--border)'}}>
+                      <div className="px-3 py-2 text-[11px] font-semibold" style={{color:'var(--text-secondary)'}}>Provided PNRs</div>
+                      {[
+                        {pnr:'SK4821X', desc:'Priya Nair · Cancelled'},
+                        {pnr:'TR1190B', desc:'Arvind · Delayed 4h'},
+                        {pnr:'WL7742', desc:'Meher · Delayed 6h'},
+                      ].filter(o=> !lookup || o.pnr.toLowerCase().includes(lookup.toLowerCase())).map(o=> (
+                        <button key={o.pnr} onMouseDown={e=>{e.preventDefault(); setLookup(o.pnr); setPnr(o.pnr)}} className="w-full text-left px-3 py-2 hover:bg-gray-50 flex justify-between">
+                          <span className="text-sm font-mono" style={{color:'var(--text)'}}>{o.pnr}</span><span className="text-xs" style={{color:'var(--text-secondary)'}}>{o.desc}</span>
+                        </button>
+                      ))}
+                      {used.length>0 && <><div className="px-3 py-1 text-[11px] font-semibold border-t" style={{color:'var(--text-secondary)'}}>Recently used</div>{used.filter(p=> !lookup || p.toLowerCase().includes(lookup.toLowerCase())).map(p=> <button key={p} onMouseDown={e=>{e.preventDefault(); setLookup(p); setPnr(p)}} className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm font-mono" style={{color:'var(--text)'}}>{p}</button>)}</>}
+                    </div>
+                  )}
+                </div>
                 <button onClick={handleFind} className="px-4 py-2 rounded-md text-sm text-white" style={{background:'var(--primary)'}}>Find my booking</button>
               </div>
               <div className="text-xs mt-2" style={{color:'var(--text-secondary)'}}>Use the booking reference from your reservation.</div>
