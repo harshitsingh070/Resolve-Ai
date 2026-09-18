@@ -1,12 +1,15 @@
 # Render — single web service for FastAPI (free tier, ephemeral FS)
+# Fix: Python 3.14 has no pydantic-core wheel → Rust build fails on read-only FS. Pin to 3.12.
 services:
   - type: web
     name: resolveai-backend
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
       - key: GROQ_API_KEY
         sync: false  # set in Render dashboard
       - key: GROQ_MODEL
