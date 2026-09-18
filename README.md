@@ -127,10 +127,10 @@ Covers: `2h meal, 3h unspecified, 4h meal+lounge, 6h hotel, 1500/1500.01/2000, c
 
 ## Frontend UX
 
-* **Minimal Enterprise Airline** `#F8FAFC` + `#2563EB`, Inter, centered `760px` portal (header `68px`, scenario tabs `Priya·Cancellation` subtle, booking `YOUR FLIGHT` + `PASSENGER`, chat `YOU blue / ASSISTANT slate` with `Checking booking…`, right `RESOLUTION ✓/⚠/✕` + `Details ▸` + `ACTIONS & STATUS`).
-* **PNR dropdown** with `Provided` + `Recently used` (localStorage, filter-as-you-type).
-* **Refresh:** `GET /api/session/{pnr}` restores `messages/trace/actions/escalation` without Groq/tool re-run.
-* **Mobile:** stacks `Customer → Booking → Chat → Resolution`.
+* **Minimal Enterprise Airline** `#F8FAFC` `#FFFFFF` `#2563EB` `#0F172A` Inter, **centered `1280px` portal, `100vh` no page scroll** — `Header 68px` (`AIRLINE RESOLUTION ASSISTANT` + PNR Find) → `Scenario tabs` subtle → `YOUR FLIGHT` horizontal (SK-204 + CANCELLED + PASSENGER) → `Two-col 68% Chat / 32% Actions` (chat `YOU blue right / ASSISTANT #F8FAFC left`, only chat scrolls).
+* **PNR dropdown** `Provided` (`SK4821X/TR1190B/WL7742`) + `Recently used` (localStorage, filter-as-you-type) on `PNR` input + centered lookup.
+* **Refresh:** `GET /api/session/{pnr}` restores `messages/trace/actions/escalation` read-only (no Groq/tool, no duplicate).
+* **Mobile:** stacks `Customer → Booking → Chat → Resolution` no overflow.
 
 ---
 

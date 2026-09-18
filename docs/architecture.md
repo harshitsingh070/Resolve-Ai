@@ -33,9 +33,9 @@
                             │
                             ▼
                   ┌──────────────────┐
-                  │   React + Vite   │
-                  │    Chat UI       │  TypeScript + Tailwind
-                  │  3-Panel Layout  │  PNR Selector (SK4821X/TR1190B/WL7742)
+                    │   React + Vite   │
+                    │  Customer Portal │  TypeScript + Tailwind
+                    │  Centered 1280px │  PNR Find + Scenario Tabs + Session Hydration
                   └────────┬─────────┘
                            │
                            │  POST /api/chat {pnr, message}
@@ -141,34 +141,40 @@ Think of the system as **4 layers**:
 
 ## 3. Component Breakdown — Why Each Exists
 
-### 3.1 Frontend (`frontend/`)
+### 3.1 Frontend (`frontend/` — actual customer-facing portal)
 
 | Component | File | Why It Exists |
 |-----------|------|---------------|
-| **App shell + routing** | `src/App.tsx` | Single-page chat + PNR selector; no auth required per assignment |
-| **CustomerCard** | `src/components/CustomerCard.tsx` | Shows name, tier badge (Gold/Silver/Platinum), PNR, contact — left sidebar. Proves lookup succeeded |
-| **BookingCard** | `src/components/BookingCard.tsx` | Shows flight, route, date, status badge (Cancelled/Delayed), delay hours, new departure — verified facts |
-| **ChatWindow** | `src/components/ChatWindow.tsx` | Message bubbles (user=right, agent=left), timestamps, input + Send |
-| **DecisionTrace** | `src/components/DecisionTrace.tsx` | Interview gold: Intent → Verified Facts ✓/✗ → Policy Rules ✓/✗ → Authority ✓/⚠ — colored |
-| **ActionLog** | `src/components/ActionLog.tsx` | Timeline `MEAL_VOUCHER_500 ✓`, `LOUNGE_ACCESS ✓`, `ESCALATION ⚠ supervisor` — from `GET /api/actions/{pnr}` |
-| **EscalationBanner** | `src/components/EscalationBanner.tsx` | Shown when `escalation != null` — yellow banner: "Escalated to supervisor: fare waiver >₹1,500" |
-| **API service** | `src/services/api.ts` | `fetch` wrapper for `/api/*`; never touches `GROQ_API_KEY` |
-| **Types** | `src/types/index.ts` | Mirrors `schemas.py` (Pydantic → TS interfaces) |
+| **App** | `src/App.tsx` | Centered `max-w 1280px`, `100vh flex flex-col overflow-hidden` (only chat `overflow-y-auto`), `GET /api/session/{pnr}` hydration + `POST /api/chat` atomic; `localStorage` for selected/used PNRs |
+| **Header** | `src/components/Header.tsx` | Compact 68px `AIRLINE RESOLUTION ASSISTANT / Support…` + `PNR [input] [Find] Help` + `✈` primary |
+| **ScenarioBar** | `src/components/ScenarioBar.tsx` | Subtle tabs `Priya·Cancellation / Arvind·4h / Meher·6h` (demo shortcuts, only set PNR) |
+| **CustomerCard** | `src/components/CustomerCard.tsx` | `CUSTOMER` 11px, `Priya Nair 15px` + tier pill, `SK4821X` mono, `✉/☎` |
+| **BookingCard** | `src/components/BookingCard.tsx` | `YOUR FLIGHT` + `SK-204` bold + `CANCELLED` red pill / `DELAYED·4h amber` + `Other bookings` collapsible (Priya return) |
+| **ChatWindow** | `src/components/ChatWindow.tsx` | `YOU`/`AGENT` 11px labels, bubbles `max-w 75%` (`user blue` / `agent #F8FAFC`), `No messages yet` empty |
+| **ChatInput** | `src/components/ChatInput.tsx` | `Type a message…` + `Send` (Enter), `Checking booking…` loading, prevents double-click |
+| **ResolutionSummary** | `src/components/ResolutionSummary.tsx` | Top of right panel `RESOLUTION ✓ Meal / ✕ Hotel / ⚠ Escallation` derived from `actions/escalation/trace` (not hardcoded) |
+| **DecisionTrace** | `src/components/DecisionTrace.tsx` | Humanized `Hotel accommodation` (not `hotel_request`), hides `amount=None`, `SR-` as sub, request-relevant filtered with `Details` expandable |
+| **ActionLog** | `src/components/ActionLog.tsx` | Compact rows `✓ meal voucher — ₹500` (not huge cards) |
+| **EscalationBanner** | `src/components/EscalationBanner.tsx` | Amber-2 `SUPERVISOR REVIEW REQUIRED` with `₹2,000 > ₹1,500` detail, only when `escalation` |
+| **StatusBadge** | `src/components/StatusBadge.tsx` | `CANCELLED red / DELAYED amber / Unaffected emerald` |
+| **API service** | `src/services/api.ts` | `getSession` (preferred) + `getCustomer/Booking/Actions/postChat/health`; never `GROQ_API_KEY` |
+| **Types** | `src/types/index.ts` | Mirrors `schemas.py` |
 
-**State (React):** `selectedPnr`, `messages[]`, `customer`, `booking`, `decisionTrace`, `actions`, `escalation`, `loading`, `error`. No Redux needed (6-hour scope).
+**State (React):** `pnr (LS), lookup, customer, booking, messages[], trace[], actions[], escalation, loading, error, showSugg, used[]`. No Redux.
 
 ### 3.2 Backend (`backend/app/`)
 
 | Component | File | Why It Exists |
 |-----------|------|---------------|
-| **Entry point** | `main.py` | Creates FastAPI app, includes routers, CORS, `lifespan` (creates tables if not exist, does **NOT** seed/wipe), error handlers |
-| **Config** | `config.py` | Loads `GROQ_API_KEY` from `backend/.env` via `pydantic-settings`; fails fast if missing |
-| **Database** | `database.py` | SQLite engine (`sqlite:///./resolveai.db`), `SessionLocal`, `Base`, `get_db()` dependency |
-| **Models** | `models.py` | SQLAlchemy tables: Customer, Booking, Action, Conversation, Escalation |
-| **Schemas** | `schemas.py` | Pydantic request/response models: `ChatRequest`, `ChatResponse`, `CustomerOut`, `BookingOut`, `DecisionTrace`, `IntentOut` |
-| **Routes — Chat** | `routes/chat.py` | `POST /api/chat` → calls orchestrator; `GET /api/conversations/{pnr}` |
-| **Routes — Customers** | `routes/customers.py` | `GET /api/customers/{pnr}` — for left card |
-| **Routes — Bookings** | `routes/bookings.py` | `GET /api/bookings/{pnr}`, `GET /api/actions/{pnr}` — for cards + logs |
+| **Entry point** | `main.py` | FastAPI app, `lifespan` `create_all` + `ensure_trace_column()` + **auto-seed if `Customer count==0`** (free tier ephemeral, no Shell needed), CORS `*` |
+| **Config** | `config.py` | `GROQ_API_KEY` via `pydantic-settings`; fails fast if missing |
+| **Database** | `database.py` | `RESOLVED_DB_URL` absolute to `backend/resolveai.db`, `SessionLocal`, `Base`, `get_db()`, `ensure_trace_column()` |
+| **Models** | `models.py` | 5 tables + `conversations.decision_trace` (persisted trace for `GET /api/session` refresh, no Groq re-run) |
+| **Schemas** | `schemas.py` | `ChatRequest`, `ChatResponse`, `SessionResponse`, `CustomerOut`, `BookingOut` |
+| **Routes — Chat** | `routes/chat.py` | `POST /api/chat` → `handle_chat` atomically |
+| **Routes — Customers** | `routes/customers.py` | `GET /api/customers/{pnr}` (fallback via `booking.customer_id` for `SK4821X-R`) |
+| **Routes — Bookings** | `routes/bookings.py` | `GET /api/bookings/{pnr}` (`?include_return`), `GET /api/actions/{pnr}`, `GET /api/conversations/{pnr}` |
+| **Routes — Session** | `routes/session.py` | `GET /api/session/{pnr}` read-only hydration `{customer, booking, messages, decision_trace, actions, escalation}` |
 
 ### 3.3 Agent Layer (`backend/app/agent/`)
 
@@ -704,38 +710,32 @@ Same flow, but `evaluate_delay(4)` → `{hotel:false}` → `create_hotel_request
 
 ---
 
-## 11. Frontend — Data & Interaction Design
+## 11. Frontend — Customer-Facing Portal (actual impl, not 3-panel admin)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  AIRLINE RESOLUTION AGENT                                          [● Demo]│
-├──────────────┬────────────────────────────┬───────────────────────────────┤
-│ LEFT         │ CENTER                     │ RIGHT / BOTTOM                │
-│ (260px)      │ (flex:1)                   │ (340px)                       │
-│              │                            │                               │
-│ Customer     │ Conversation               │ DECISION TRACE                │
-│ ┌──────────┐ │ ┌────────────────────────┐ │ Intent: hotel_request         │
-│ │Priya Nair│ │ │ user: "I want hotel"   │ │ Facts: SK-305 6h delay ✓      │
-│ │Gold ●    │ │ └────────────────────────┘ │ Policy:                       │
-│ │SK4821X   │ │ ┌────────────────────────┐ │  ✓ meal ₹500 (SR-03)          │
-│ │priya@... │ │ │ agent: "I understand…" │ │  ✓ lounge (SR-03)             │
-│ └──────────┘ │ └────────────────────────┘ │  ✓ hotel delayed-hours (SR-04)│
-│ Booking      │ ┌────────────────────────┐ │  ✗ full-night (SR-04)         │
-│ ┌──────────┐ │ │ PNR: [SK4821X ▼]       │ │ Authority:                    │
-│ │SK-204    │ │ │ [Type message…] [Send] │ │  ✓ voucher/lounge/hotel       │
-│ │DEL→GOA   │ │ └────────────────────────┘ │  ⚠ fare ₹2000 → supervisor    │
-│ │Cancelled │ │                            ├───────────────────────────────┤
-│ │Oper. rsn │ │                            │ ACTION LOG                    │
-│ └──────────┘ │                            │ 09:41 ✓ MEAL_VOUCHER ₹500     │
-│              │                            │ 09:41 ✓ LOUNGE_ACCESS         │
-│              │                            │ 09:41 ✓ HOTEL delayed-hours   │
-│              │                            │ 09:41 ⚠ ESCALATION fare_waiver│
-└──────────────┴────────────────────────────┴───────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ HEADER 68px  AIRLINE RESOLUTION ASSISTANT  PNR [SK4821X] [Find] Help      │  #F1F5F9, aviation blue
+├──────────────────────────────────────────────────────────────┤
+│ SCENARIO TABS  Priya · Cancellation  Arvind · 4h Delay  Meher · 6h Delay   │  subtle, active blue underline
+├──────────────────────────────────────────────────────────────┤
+│ YOUR FLIGHT  SK-204 Delhi→Goa 23 Sep·18:40  CANCELLED | PASSENGER Priya Gold PNR:SK4821X │ horizontal, status prominent
+├───────────────────────────────────┬──────────────────────────┤
+│  RESOLUTION ASSISTANT 68%        │  ACTIONS & STATUS 32%    │  max-w 1280px, 100vh, only chat scrolls
+│  🤖 Tell us what you need…       │  No actions yet → after request:          │
+│  YOU (blue right)                │  ✓ Meal voucher ₹500                     │
+│  ASSISTANT (light slate left)    │  ✓ Lounge access                         │
+│  [Type message...] [Send]        │  ⚠ Supervisor review (fare 2000)         │
+│  Checking booking… (loading)     │  ▾ Resolution details (Intent·Booking·Policy SR) │
+└───────────────────────────────────┴──────────────────────────┘
+│ FOOTER  © 2026 Airline · Privacy | Terms | Contact             │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-**Data fetching:** On `selectedPnr` change → `GET /customers`, `/bookings`, `/actions`, `/conversations` in parallel (4 fetches). On `Send` → `POST /chat` → optimistically append user msg → replace with full response + update right panel.
+**Actual components (frontend/src/components):** `Header.tsx` (68px + PNR Find + Help), `ScenarioBar.tsx` (subtle tabs), `CustomerCard.tsx` (CUSTOMER 11px + name 15px + tier pill), `BookingCard.tsx` (YOUR FLIGHT + status CANCELLED red / DELAYED amber + Other bookings collapsible), `ChatWindow.tsx` (YOU/AGENT labels, max-w 75%, only chat `overflow-y-auto`), `ChatInput.tsx` (Enter to send, `Checking booking…`), `ResolutionSummary.tsx` (RESOLUTION ✓/✕ from actions), `DecisionTrace.tsx` (DECISION humanized, SR as sub, request-relevant filtered), `ActionLog.tsx` (compact rows), `EscalationBanner.tsx` (amber-2, fare detail).
 
-**Styling:** Tailwind. Status badges: `Cancelled`=red, `Delayed`=amber, `Unaffected`=green. Trace: ✓=green, ✗=red, ⚠=amber. No heavy UI library (6h scope).
+**Data fetching (actual):** `GET /api/session/{pnr}` single read-only hydration (customer+booking+messages+decision_trace+actions+escalation, from `conversations.decision_trace` persisted, no Groq). `POST /api/chat` → atomic `setMessages/setTrace/setEscalation/setActions`. `PNR` input has dropdown `Provided (SK4821X/TR1190B/WL7742)` + `Recently used` (localStorage, filter-as-you-type).
+
+**Styling:** Tailwind 4.3 + `@tailwindcss/vite`, `#F8FAFC` bg, `#FFFFFF` surface, `#2563EB` primary, Inter, 8px radius, thin `1px #E2E8F0` borders, `100vh flex flex-col overflow-hidden` (only chat scrolls).
 
 ---
 

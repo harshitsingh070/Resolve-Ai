@@ -7,16 +7,17 @@
 
 ---
 
-## 1. At-a-Glance — All APIs (Frozen)
+## 1. At-a-Glance — All APIs (Frozen, actual impl)
 
 | # | Method | Path | File | Purpose | Used By |
 |---|--------|------|------|---------|---------|
 | 1 | `POST` | `/api/chat` | `routes/chat.py` | **Main agent turn** — intent → policy → tools → audit → grounded response | ChatWindow Send |
-| 2 | `GET` | `/api/customers/{pnr}` | `routes/customers.py` | Customer card | Left panel on PNR change |
-| 3 | `GET` | `/api/bookings/{pnr}` | `routes/bookings.py` | Booking card (supports `?include_return=true` for Priya's return leg) | Left panel |
-| 4 | `GET` | `/api/actions/{pnr}` | `routes/bookings.py` | Action Log timeline | Right panel |
-| 5 | `GET` | `/api/conversations/{pnr}` | `routes/chat.py` | Full chat history | ChatWindow history |
-| 6 | `GET` | `/api/health` | `main.py` | Health check | Deployment / frontend "backend unreachable" check |
+| 2 | `GET` | `/api/session/{pnr}` | `routes/session.py` | **Hydrate after refresh** — `{customer, booking, messages, decision_trace, actions, escalation}` (read-only, no Groq/tool) | `App.tsx load()` — single call, persists trace via `conversations.decision_trace` |
+| 3 | `GET` | `/api/customers/{pnr}` | `routes/customers.py` | Customer card (fallback via `booking.customer_id` for `SK4821X-R`) | Direct access, also called by session |
+| 4 | `GET` | `/api/bookings/{pnr}` | `routes/bookings.py` | Booking card (`?include_return=true`) | Direct access |
+| 5 | `GET` | `/api/actions/{pnr}` | `routes/bookings.py` | Action Log timeline | Direct or session |
+| 6 | `GET` | `/api/conversations/{pnr}` | `routes/chat.py` | Full chat history | Direct or session |
+| 7 | `GET` | `/api/health` | `main.py` | Health check | Deployment |
 
 **Common headers:** `Content-Type: application/json` for POST. No custom headers. CORS enabled for `http://localhost:5173` (Vite).
 
@@ -422,16 +423,15 @@ If not implemented, frontend can `GET /docs` or `GET /api/customers/SK4821X` as 
 
 ---
 
-## 10. Frontend Call Order (How UI Uses These)
+## 10. Frontend Call Order (actual impl)
 
 ```
-User picks PNR "WL7742"
+User picks PNR "WL7742" or refresh
    │
-   ├─ GET /api/customers/WL7742   ──▶  CustomerCard
-   ├─ GET /api/bookings/WL7742    ──▶  BookingCard
-   ├─ GET /api/actions/WL7742     ──▶  ActionLog
-   └─ GET /api/conversations/WL7742 ──▶ ChatWindow history
-                (4 in parallel, Promise.all)
+   └─ GET /api/session/WL7742  ──▶  {customer, booking, messages, decision_trace, actions, escalation}
+        (single read-only, no Groq/tool, trace from conversations.decision_trace, localStorage remembers PNR)
+        → hydrate CustomerCard + BookingCard + ChatWindow + DecisionTrace + ActionLog + EscalationBanner at once
+        → no stale Arvind trace for Meher
 
 User clicks Send "waive 2000"
    │
@@ -439,9 +439,11 @@ User clicks Send "waive 2000"
         ◀─ {response, intent, actions, escalation, decision_trace, booking, customer}
              │
              ├─ append to messages[]
-             ├─ setDecisionTrace(decision_trace)
-             ├─ setActions(prev + actions)   // or refetch GET /api/actions
-             └─ if escalation → show EscalationBanner
+             ├─ setDecisionTrace(decision_trace)  // factual trace persisted on conversations.decision_trace
+             ├─ setActions(prev + actions) + GET /api/actions for full history
+             └─ if escalation → EscalationBanner
+
+Direct GETs (/customers, /bookings, /actions, /conversations) remain for individual refresh, but session is preferred for hydration.
 ```
 
 ---

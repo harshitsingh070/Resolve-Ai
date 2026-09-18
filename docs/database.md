@@ -133,9 +133,10 @@
 | `role` | TEXT | `user | assistant`, NOT NULL | `user` | Bubble side |
 | `message` | TEXT | NOT NULL | `I want hotel for tonight` | ChatWindow |
 | `intent` | JSON (TEXT) | NULLABLE | `{"primary_intent":"hotel_request","sentiment":"frustrated"}` | Stored intent for trace |
+| `decision_trace` | JSON (TEXT) | NULLABLE | `["Intent: Hotel accommodation","Policy: delay 4h → meal ₹500 ✓"]` | Persisted factual trace for refresh (assistant rows only, no Groq regeneration) |
 | `created_at` | DATETIME | NOT NULL | `2026-09-18 09:40:00` | History sort |
 
-**Kept:** every user + assistant turn. Intent stored only on assistant rows (optional).
+**Kept:** every user + assistant turn. Intent + decision_trace stored on assistant rows (Phase 8.5, `conversations.decision_trace` added via `ensure_trace_column()` migration; old rows without trace return `[]`).
 
 ### 3.5 `escalations` — What needed a *human*
 
@@ -205,6 +206,7 @@ CREATE TABLE conversations (
   role       TEXT NOT NULL CHECK (role IN ('user','assistant')),
   message    TEXT NOT NULL,
   intent     TEXT,  -- JSON
+  decision_trace TEXT,  -- JSON array, persisted factual trace (Phase 8.5)
   created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_conversations_booking_id ON conversations(booking_id);
