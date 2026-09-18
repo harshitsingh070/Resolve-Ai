@@ -1,41 +1,67 @@
 # ResolveAI — Airline Customer-Facing Resolution Agent
 
-**Assignment 3 — Airline Disruption** · Policy-grounded agent that understands customer intent, checks deterministic business rules, executes allowed actions, and escalates the rest.
+**Live:** **https://resolve-ai-frontend-puce.vercel.app/** · **API Docs:** `https://<backend>.onrender.com/docs` (or `http://localhost:8000/docs` locally)
+
+Policy-grounded agent for airline disruptions — understands customer intent (Groq), checks deterministic business rules (Python), executes allowed actions or escalates, and keeps full audit.
 
 > **Principle:** `LLM understands and communicates. Deterministic Python enforces business rules.`
 
-![Stack](https://img.shields.io/badge/Frontend-React%20%2B%20Vite%20%2B%20Tailwind-blue) ![Backend](https://img.shields.io/badge/Backend-FastAPI%20%2B%20SQLite-green) ![LLM](https://img.shields.io/badge/LLM-Groq%20openai%2Fgpt--oss--20b-orange)
+---
+
+## Try It Live (no setup)
+
+1. Open **https://resolve-ai-frontend-puce.vercel.app/**
+2. Pick a scenario or type a PNR:
+   * `SK4821X` — **Priya Nair** (Gold) · `SK-204 Delhi → Goa` · **CANCELLED** (Operational reasons) · Return `SK-204R Goa → Delhi Unaffected`
+   * `TR1190B` — **Arvind Kulkarni** (Silver) · `SK-118 Mumbai → Bengaluru` · **Delayed 4h** → new `11:10`
+   * `WL7742` — **Meher Kaur** (Platinum) · `SK-305 Delhi → Hyderabad` · **Delayed 6h** → new `20:00`
+   * `XX9999` — unknown (shows friendly error)
+3. Try these messages (paraphrases work too):
+   * **Arvind 4h hotel:** `I need a hotel` / `I need accommodation` / `I need somewhere to stay` / `Can you arrange accommodation?` / `Can you provide a room?` → `✓ Meal ₹500 + ✓ Lounge` , `✕ Hotel — requires >5h (SR-04)`
+   * **Meher 6h hotel:** `I need a hotel for the whole night` → `✓ Meal + ✓ Lounge + ✓ Hotel delayed hours only` (never full-night)
+   * **Meher fare:** `waive my 2000 fare difference` / `I want a full-night hotel and waive 2000` → `Hotel delayed + ⚠ ₹2,000 → supervisor (>₹1,500 SR-06)` (`1500` allowed, `1500.01` escalates)
+   * **Priya refund + upgrade:** `I am furious! I want full cash refund and free business upgrade for the trouble.` → `✓ Refund initiated (7 days, original method SR-05)` + `⚠ Upgrade escalated (SR-07, no extra for Gold)`
+   * **Hello:** `hello` → `General inquiry` → still shows booking, no fake actions
+4. **Refresh** `Ctrl+R` → chat, trace, actions, escalation stay (via `GET /api/session/{pnr}` read-only, no duplicate actions, no new Groq call)
+5. **Switch PNR** via `PNR` dropdown (shows **Provided** + **Recently used**, filter-as-you-type) or scenario tabs — old trace/actions clear, new PNR loads only its data
+
+**PNR dropdown:** header `PNR [ SK4821X ▼]` + centered `Find my booking` both show **Provided** (`SK4821X/TR1190B/WL7742/SK4821X-R`) + **Recently used** (last 6 from `localStorage`, persisted across refresh).
 
 ---
 
-## Live Demo (local)
+## What Happened / What’s Allowed (quick ref)
 
-* **Frontend:** `http://localhost:5173` (Vite)
-* **Backend:** `http://localhost:8000` (`/docs` for Swagger)
-* **3 PNRs:** `SK4821X` Priya (Cancelled Gold), `TR1190B` Arvind (Delayed 4h Silver), `WL7742` Meher (Delayed 6h Platinum)
+* **Cancellation (airline, Operational):** free rebook within 24h **OR** full refund (choice) → 7 days to original method only
+* **Delay <3h:** meal ₹500
+* **Delay =3h:** **unspecified** (no entitlement)
+* **Delay >3h & ≤5h:** meal ₹500 + lounge
+* **Delay >5h:** + hotel **delayed-hours only** (never full night)
+* **Fare waiver:** agent ≤₹1,500 → supervisor if `>1500`
+* **Loyalty Gold/Platinum:** priority rebooking only, no extra
+
+Full table in `docs/policy-rules.md`.
 
 ---
 
 ## Tech Stack
 
-* **Frontend:** React 19 + Vite 8 + TypeScript + Tailwind 4.3 (`@tailwindcss/vite`)
-* **Backend:** Python 3.12 + FastAPI 0.115 + Pydantic 2.11 + SQLAlchemy 2.0
-* **DB:** SQLite (`backend/resolveai.db`, file-based, zero-setup)
-* **LLM:** Groq API (`openai/gpt-oss-20b`, structured JSON, `temperature 0.1/0.3`)
-* **Tests:** pytest 8.3 (99 tests)
+* **Frontend:** React 19 + Vite 8 + TypeScript + Tailwind 4.3 (`@tailwindcss/vite`), `100vh` no page scroll — centered `1280px` portal (`Header 68px` + `Scenario tabs` + `YOUR FLIGHT` horizontal + `68% Chat / 32% Actions`, only chat scrolls)
+* **Backend:** Python 3.12 + FastAPI 0.115 + Pydantic 2.11 + SQLAlchemy 2.0 + Groq `openai/gpt-oss-20b` (structured JSON, retry once → fallback)
+* **DB:** SQLite `backend/resolveai.db` (`Customer 1—N Bookings 1—N Actions/Conversations/Escalations`, `conversations.decision_trace` persisted for refresh)
+* **Tests:** pytest 8.3 — **99 passed** (policy / tools / intent / orchestrator / session / e2e)
 
-**No** Postgres, Redis, Docker, RAG, LangChain — intentionally simple for 6-hour scope.
+No Postgres, Redis, Docker, RAG, LangChain — intentionally simple.
 
 ---
 
-## Quick Start (Windows PowerShell)
+## Run Locally (Windows PowerShell)
 
 ```powershell
 # 1. Clone
 git clone https://github.com/harshitsingh070/Resolve-Ai.git
 cd ResolveAI
 
-# 2. Backend
+# 2. Backend http://localhost:8000  (http://localhost:8000/docs)
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1
@@ -43,12 +69,12 @@ pip install -r requirements.txt
 copy .env.example .env   # set GROQ_API_KEY from https://console.groq.com/keys
 python seed.py           # 3 customers + 4 bookings (Priya has 2)
 python -m uvicorn app.main:app --reload --port 8000
-# -> http://localhost:8000/docs
 
-# 3. Frontend (new terminal)
+# 3. Frontend http://localhost:5173  (new terminal)
 cd frontend
 npm install
-npm run dev              # -> http://localhost:5173 (VITE_API_URL=http://localhost:8000)
+npm run dev              # VITE_API_URL defaults to http://localhost:8000
+# or: $env:VITE_API_URL="https://<your-backend>.onrender.com"; npm run dev
 ```
 
 **Env (`backend/.env`):**
@@ -58,57 +84,29 @@ GROQ_MODEL=openai/gpt-oss-20b
 DATABASE_URL=sqlite:///./resolveai.db
 ```
 
----
-
-## Architecture (v1.1 locked)
-
+**Verify:**
+```powershell
+Invoke-RestMethod http://localhost:8000/api/health
+Invoke-RestMethod http://localhost:8000/api/customers/SK4821X
+$body=@{pnr="TR1190B";message="Need hotel accommodation"} | ConvertTo-Json
+Invoke-RestMethod -Uri http://localhost:8000/api/chat -Method POST -ContentType "application/json" -Body $body
 ```
-Customer → React (centered 1280px, 100vh) → FastAPI → Orchestrator → Groq (intent) → DB (verified facts) → Policy Engine (pure Python) → Authorization → Tools/Escalation → Audit → Groq (response) → Customer
-```
-
-* **Policy Engine** (`app/policies/policy_engine.py`): `evaluate_delay` (<3 meal, =3 unspecified, >3 meal+lounge, >5 hotel delayed), `evaluate_cancellation` (Cancelled+Operational → refund/rebook 24h 7d original), `evaluate_fare_difference` (≤1500 waive, >1500 escalate).
-* **Tools** self-check + idempotent (`booking_id+action_type`).
-* **DB** `Customer 1—N Bookings 1—N Actions/Conversations/Escalations` (`booking_id FK` + `pnr IDX`).
-* **Session** `GET /api/session/{pnr}` persists `decision_trace` on `conversations.decision_trace` (read-only refresh, no Groq re-run).
-* Docs: `docs/requirements.md`, `architecture.md`, `database.md`, `api-contract.md`, `assumptions.md`.
 
 ---
 
-## API (per `docs/api-contract.md`)
+## API (see `docs/api-contract.md` + `http://localhost:8000/docs`)
 
-| Method | Path | Description |
-|--------|------|-------------|
+| Method | Path | Purpose |
+|--------|------|---------|
 | `POST` | `/api/chat` | `{pnr, message}` → `{response, intent, actions, escalation, decision_trace, booking, customer}` |
-| `GET` | `/api/session/{pnr}` | Hydrate after refresh (customer, booking, messages, trace, actions, escalation) |
+| `GET` | `/api/session/{pnr}` | Hydrate after refresh (single read-only) |
 | `GET` | `/api/customers/{pnr}` | Customer card |
-| `GET` | `/api/bookings/{pnr}` | Booking card (`?include_return=true` for Priya) |
+| `GET` | `/api/bookings/{pnr}` (`?include_return=true`) | Booking card (Priya return) |
 | `GET` | `/api/actions/{pnr}` | Action log |
 | `GET` | `/api/conversations/{pnr}` | Chat history |
 | `GET` | `/api/health` | `ok` |
 
-**PPNR handling:** `SK4821X-R` (Priya return) resolves via `booking.customer_id`; `XX9999` → `404`.
-
----
-
-## Policy Rules (from `docs/policy-rules.md`)
-
-* **Cancellation (airline):** free rebook within 24h **OR** full refund (customer choice), 7 days original method.
-* **Delay <3h:** meal ₹500
-* **Delay =3h:** **unspecified** (no entitlement)
-* **Delay >3h:** meal ₹500 + lounge
-* **Delay >5h:** + hotel delayed-hours only (not full night)
-* **Fare waiver:** agent ≤₹1,500, `>1500` → supervisor (`1500.01` escalates)
-* **Loyalty Gold/Platinum:** priority rebooking only, no extra compensation.
-
----
-
-## Demo Script (3 mandatory scenarios)
-
-**Priya `SK4821X` Cancelled:** `"I am furious! I want full cash refund and free business upgrade for the trouble."` → `REFUND_INITIATED` + `upgrade_exception escalated` (Gold no extra).
-**Arvind `TR1190B` Delayed 4h:** `"I need a hotel"` (or `somewhere to stay`, `place to stay`, `provide a room`) → `MEAL_VOUCHER` + `LOUNGE_ACCESS`, `HOTEL blocked (>5h SR-04)`.
-**Meher `WL7742` Delayed 6h:** `"I want a full-night hotel and waive 2000"` → `MEAL+LOUNGE+HOTEL delayed_hours_only` + `fare 2000 escalated (>1500 SR-06)` (full-night not granted).
-
-See `docs/demo-script.md` for 15-min defence.
+`SK4821X-R` (Priya return) resolves via `booking.customer_id`; `XX9999` → `404` (chat stays `200` with friendly message).
 
 ---
 
@@ -117,28 +115,18 @@ See `docs/demo-script.md` for 15-min defence.
 ```powershell
 cd backend
 .\venv\Scripts\python -m pytest tests -v   # 99 passed
-.\venv\Scripts\python -m pytest tests/test_policy_engine.py -v
-.\venv\Scripts\python -m pytest tests/test_e2e_scenarios.py -v
 ```
 
-Covers: `2h meal, 3h unspecified, 4h meal+lounge, 6h hotel, 1500/1500.01/2000, cancellation, hotel coverage, refund alternate, PNR isolation, refresh idempotency, hotel paraphrases (11), session persistence`.
+Covers: `2h meal, 3h unspecified, 4h meal+lounge, 6h hotel, 1500/1500.01/2000, cancellation, hotel coverage, refund alternate, PNR isolation, refresh idempotency, hotel paraphrases (11), session persistence, e2e Priya/Arvind/Meher`.
 
 ---
 
-## Frontend UX
+## Deployment (Vercel + Render, free tier)
 
-* **Minimal Enterprise Airline** `#F8FAFC` `#FFFFFF` `#2563EB` `#0F172A` Inter, **centered `1280px` portal, `100vh` no page scroll** — `Header 68px` (`AIRLINE RESOLUTION ASSISTANT` + PNR Find) → `Scenario tabs` subtle → `YOUR FLIGHT` horizontal (SK-204 + CANCELLED + PASSENGER) → `Two-col 68% Chat / 32% Actions` (chat `YOU blue right / ASSISTANT #F8FAFC left`, only chat scrolls).
-* **PNR dropdown** `Provided` (`SK4821X/TR1190B/WL7742`) + `Recently used` (localStorage, filter-as-you-type) on `PNR` input + centered lookup.
-* **Refresh:** `GET /api/session/{pnr}` restores `messages/trace/actions/escalation` read-only (no Groq/tool, no duplicate).
-* **Mobile:** stacks `Customer → Booking → Chat → Resolution` no overflow.
+* **Frontend (Vercel):** import `frontend` as Vite → Build `npm run build` → Output `dist` → Env `VITE_API_URL=https://<backend>.onrender.com` → Deploy (live at **https://resolve-ai-frontend-puce.vercel.app/**)
+* **Backend (Render):** `backend` → Build `pip install -r requirements.txt` (uses `runtime.txt` `python-3.12.10`) → Start `uvicorn app.main:app --host 0.0.0.0 --port $PORT` → Env `GROQ_API_KEY`, `GROQ_MODEL`, `DATABASE_URL` → Health `GET /api/health` → first request auto-seeds if DB empty (free tier ephemeral FS, no Shell needed)
 
----
-
-## Deployment
-
-* **Frontend:** Vercel (`VITE_API_URL` → Render URL)
-* **Backend:** Render/Fly (`uvicorn app.main:app`, `PORT 8000`, SQLite file; ephemeral FS may reset — see `assumptions.md L-03`, locally persistent)
-* No Docker/K8s needed.
+Details + SQLite persistence note in `docs/deployment.md`.
 
 ---
 
@@ -147,23 +135,22 @@ Covers: `2h meal, 3h unspecified, 4h meal+lounge, 6h hotel, 1500/1500.01/2000, c
 ```
 ResolveAI/
 ├── backend/app/{main,config,database,models,schemas,routes/{chat,customers,bookings,session},agent/{orchestrator,intent,prompts},policies/policy_engine,tools/*}
-├── backend/seed.py, requirements.txt, resolveai.db
+├── backend/seed.py, requirements.txt, runtime.txt, resolveai.db
 ├── frontend/src/{App, components/*, services/api, types}
-├── docs/{requirements,architecture,database,api-contract,assumptions,policy-rules,demo-script}
-├── .env.example, .gitignore, README.md
+├── docs/{requirements,architecture,database,api-contract,assumptions,policy-rules,demo-script,deployment}
+└── .env.example, .gitignore
 ```
 
 ---
 
-## Interview Defence (25 Qs in `docs/requirements.md:88`)
+## Interview Defence (25 Qs in `docs/requirements.md`)
 
-Why Groq? Why deterministic engine? Hallucination prevention? Escalation? SQLite? RAG avoided? Scaling? Idempotency?
+Why Groq? Why deterministic engine? Hallucination prevention? Escalation? Why SQLite? RAG avoided? Scaling? Idempotency?
 
-**Agent vs Chatbot:** Chatbot generates text; agent does `intent → verified facts → policy → authorization → tool → audit → grounded response` with `decision_trace`.
+**Agent vs Chatbot:** Chatbot generates text; agent does `intent → verified facts → policy → authorization → tool → audit → grounded response` with `decision_trace` persisted on `conversations.decision_trace`.
 
 ---
 
 ## License
 
 Assignment prototype — not for production without auth, payments, inventory integration.
-
