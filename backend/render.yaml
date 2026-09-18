@@ -1,0 +1,16 @@
+# Render — single web service for FastAPI (free tier, ephemeral FS)
+services:
+  - type: web
+    name: resolveai-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false  # set in Render dashboard
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: DATABASE_URL
+        value: sqlite:///./resolveai.db
+    healthCheckPath: /api/health
