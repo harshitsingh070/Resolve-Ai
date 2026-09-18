@@ -1,25 +1,16 @@
 import type { Action } from '../types'
-const label: Record<string, string> = {
-  MEAL_VOUCHER: 'Meal voucher', LOUNGE_ACCESS: 'Lounge access', HOTEL: 'Hotel', REFUND_INITIATED: 'Refund initiated', REBOOKED: 'Rebooked'
-}
 export default function ActionLog({ actions }: { actions: Action[] }) {
-  if (!actions || actions.length === 0) return <div className="p-4 text-xs text-gray-400 border rounded-xl bg-gray-50">No actions yet — eligible actions will appear here after your message</div>
+  if(!actions||actions.length===0) return <div className="py-3 border-b"><div className="text-[11px] tracking-wide text-gray-400 font-semibold mb-1">ACTIONS</div><div className="text-xs text-gray-400">No actions yet</div></div>
   return (
-    <div className="p-4 border rounded-xl bg-white shadow-sm">
-      <div className="text-xs font-bold tracking-wide text-gray-800 mb-3">ACTION LOG</div>
-      <div className="space-y-2">
-        {actions.map(a => (
-          <div key={a.id} className="flex items-center gap-3 p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
-            <span className="h-6 w-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">✓</span>
-            <div className="flex-1">
-              <div className="text-xs font-semibold text-emerald-900">{label[a.action_type] || a.action_type}</div>
-              <div className="text-[11px] text-emerald-700">{a.reason?.replace('delay_','').replace('_',' ') || 'completed'}</div>
-            </div>
-            <div className="text-right">
-              {a.metadata?.amount && <div className="text-xs font-bold text-gray-900">₹{a.metadata.amount}</div>}
-              {a.metadata?.coverage && <div className="text-[11px] text-gray-500">{a.metadata.coverage.replace('_',' ')}</div>}
-              {a.metadata?.window_hours && <div className="text-[11px] text-gray-500">{a.metadata.window_hours}h window</div>}
-            </div>
+    <div className="py-3 border-b">
+      <div className="text-[11px] tracking-wide text-gray-400 font-semibold mb-2">ACTIONS</div>
+      <div className="space-y-1">
+        {actions.map(a=> (
+          <div key={a.id} className="flex items-center gap-2 text-xs">
+            <span className="text-emerald-600 text-xs">✓</span>
+            <span className="text-gray-800">{a.action_type.replace('_',' ').toLowerCase()}</span>
+            {a.metadata?.amount && <span className="ml-auto text-gray-600">₹{a.metadata.amount}</span>}
+            {a.metadata?.coverage && <span className="ml-auto text-gray-500 text-[11px]">{a.metadata.coverage.replace('_',' ')}</span>}
           </div>
         ))}
       </div>

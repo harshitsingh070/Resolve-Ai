@@ -99,6 +99,16 @@ def handle_chat(db: Session, pnr: str, message: str) -> dict:
         trace.append(f"Groq intent failed, fallback keyword: {str(e)[:100]}")
         intent = fallback_intent(msg)
 
+    # FIX 1/2: If Groq returned unknown but fallback clearly detects hotel/refund/etc., use fallback (preserves hotel intent, Fix 2: missing optional entities must not pollute)
+    if intent.primary_intent == "unknown":
+        fb = fallback_intent(msg)
+        if fb.primary_intent != "unknown":
+            trace.append(f"Groq returned unknown, using fallback: {fb.primary_intent}")
+            # preserve Groq sentiment if it was legal_threat etc., else use fallback
+            if intent.sentiment != "neutral" and intent.sentiment != fb.sentiment:
+                fb.sentiment = intent.sentiment
+            intent = fb
+
     # Validate intent shape already done in extract_intent
     trace.append(f"Intent: {intent.primary_intent} + {intent.secondary_intents} ({intent.sentiment}) amount={intent.entities.amount} hotel_type={intent.entities.hotel_type}")
 

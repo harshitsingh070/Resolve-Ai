@@ -30,13 +30,18 @@ Return ONLY valid JSON with this exact shape, no extra text:
 }}
 
 Rules:
-- primary_intent is the main request in the CURRENT message (e.g., "I want hotel" -> hotel_request, "waive 2000" -> fare_waiver_request, "refund please" -> refund_request)
+- primary_intent is the main request in the CURRENT message (e.g., "I want hotel" -> hotel_request, "waive 2000" -> fare_waiver_request, "refund please" -> refund_request). Mood does NOT change intent: "I'm frustrated, I need a hotel" is still hotel_request, not complaint.
 - secondary_intents are other requests in same message (e.g., hotel + fare waiver -> hotel_request + fare_waiver_request)
-- sentiment: frustrated/angry if strong emotion, legal_threat if mentions sue/lawyer/court/legal action/formal complaint
+- sentiment: detect customer mood separately from intent. Use frustrated if message contains frustrated, angry, furious, upset, annoyed, disappointed, stranded, worried, anxious, terrible, ridiculous, or says "miss an important meeting" / "messed up" / "unacceptable". Use legal_threat if mentions sue/lawyer/court/legal action/formal complaint. Otherwise neutral. Example: "I'm frustrated because my 4 hour delay is making me miss an important meeting. I need a hotel." -> primary hotel_request, sentiment frustrated.
 - requested_exception true if customer wants beyond standard (full-night hotel, alternate refund method, upgrade for trouble, waive over limit)
 - entities.amount: numeric fare difference if mentioned (e.g., 2000, 1500.01) else null
 - entities.hotel_type: full_night if says full night / overnight / 24h hotel, delayed_hours if says delayed-hours / during delay, null otherwise
 - Do NOT decide if request is allowed. Do NOT add reasoning. Just classify.
+
+Examples:
+- "I need a hotel" -> {{"primary_intent":"hotel_request","sentiment":"neutral"}}
+- "I'm frustrated because my 4 hour delay is making me miss an important meeting. I need a hotel." -> {{"primary_intent":"hotel_request","sentiment":"frustrated"}}
+- "hello" -> {{"primary_intent":"unknown","sentiment":"neutral"}}
 
 User message: {message}
 """

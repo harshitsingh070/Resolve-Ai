@@ -118,37 +118,58 @@ def extract_intent(message: str, booking_context: str = "", history: str = "") -
 
 
 def fallback_intent(message: str) -> IntentResult:
-    """Keyword fallback when Groq retries both fail — minimal, no elaborate NLP (6h scope)."""
+    """Keyword fallback when Groq retries both fail — minimal, no elaborate NLP (6h scope).
+    Covers hotel paraphrases required by QA: hotel, accommodation, somewhere to stay, place to stay, arrange hotel/accommodation, stranded, room."""
     low = message.lower()
-    primary = "unknown"
-    secondary = []
+    detected: list[str] = []
+    # collect all matched intents (order matters for primary)
     if any(k in low for k in ["refund", "cash back", "money back"]):
-        primary = "refund_request"
-    elif any(k in low for k in ["rebook", "re-book", "next flight", "another flight"]):
-        primary = "rebooking_request"
-    elif "hotel" in low or "accommodation" in low or "stay" in low or "somewhere to stay" in low:
-        primary = "hotel_request"
-    elif any(k in low for k in ["lounge"]):
-        primary = "lounge_request"
-    elif any(k in low for k in ["meal", "voucher", "food"]):
-        primary = "meal_voucher_request"
-    elif any(k in low for k in ["waive", "fare difference", "fare waiver"]):
-        primary = "fare_waiver_request"
-    elif any(k in low for k in ["upgrade", "business class"]):
-        primary = "upgrade_request"
-    elif "booking" in low or "flight status" in low or "pnr" in low:
-        primary = "booking_inquiry"
+        detected.append("refund_request")
+    if any(k in low for k in ["rebook", "re-book", "next flight", "another flight"]):
+        detected.append("rebooking_request")
+    # hotel / accommodation paraphrases — comprehensive per QA Fix 1
+    hotel_keys = ["hotel", "accommodation", "somewhere to stay", "place to stay", "need a place", "need somewhere", "arrange a hotel", "arrange accommodation", "stranded", "provide a room", "a room", "place to stay tonight", "somewhere to stay because", "room"]
+    if any(k in low for k in hotel_keys):
+        detected.append("hotel_request")
+    if any(k in low for k in ["lounge"]):
+        detected.append("lounge_request")
+    if any(k in low for k in ["meal", "voucher", "food"]):
+        detected.append("meal_voucher_request")
+    if any(k in low for k in ["waive", "fare difference", "fare waiver"]):
+        detected.append("fare_waiver_request")
+    if any(k in low for k in ["upgrade", "business class"]):
+        detected.append("upgrade_request")
+    if "booking" in low or "flight status" in low or "pnr" in low:
+        detected.append("booking_inquiry")
+
+    if not detected:
+        primary = "unknown"
+        secondary = []
+    else:
+        # deduplicate while preserving order
+        seen = set()
+        uniq = []
+        for d in detected:
+            if d not in seen:
+                seen.add(d)
+                uniq.append(d)
+        primary = uniq[0]
+        secondary = uniq[1:]
 
     sentiment = "neutral"
     if any(k in low for k in ["sue", "lawyer", "legal", "court", "formal complaint"]):
         sentiment = "legal_threat"
-    elif any(k in low for k in ["furious", "angry", "ridiculous", "frustrated", "terrible"]):
+    elif any(k in low for k in ["furious", "angry", "ridiculous", "frustrated", "terrible", "upset", "annoyed", "disappointed", "stranded", "urgent", "worried", "anxious", "miss an important meeting", "messed up", "unacceptable"]):
+        # mood-based: frustrated/angry keywords indicate customer is upset — keep intent as hotel/refund etc. but mark sentiment
         sentiment = "frustrated"
+        # also treat strong angry words as frustrated for this prototype
+        if any(k in low for k in ["furious", "angry"]):
+            sentiment = "frustrated"
 
     amount = None
     import re
     m = re.search(r"₹?\s*([\d,]+\.?\d*)", message)
-    if m and primary == "fare_waiver_request":
+    if m and any(k in low for k in ["waive", "fare difference", "fare waiver"]):
         try:
             amount = float(m.group(1).replace(",", ""))
         except Exception:

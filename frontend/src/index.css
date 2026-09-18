@@ -1,4 +1,22 @@
 @import "tailwindcss";
 
-/* Minimal overrides for ResolveAI */
-body { font-family: Inter, system-ui, sans-serif; }
+:root {
+  --bg: #F8FAFC;
+  --surface: #FFFFFF;
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --text: #0F172A;
+  --text-secondary: #64748B;
+  --border: #E2E8F0;
+  --success: #059669;
+  --success-bg: #ECFDF5;
+  --warning: #D97706;
+  --warning-bg: #FFFBEB;
+  --error: #DC2626;
+  --error-bg: #FEF2F2;
+}
+html { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+html, body, #root { height: 100%; }
+body { background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; overflow: hidden; }
+#root { display: flex; flex-direction: column; }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
